@@ -1,0 +1,34 @@
+# Ignore build internals but keep bin
+build/*
+!build/bin/
+build/bin/*
+!build/bin/JetsonTracker_*
+
+# Compiled object files
+*.o
+
+# Backup files
+*.bak
+*.bak2
+
+# cvtracker build folders only
+cvtracker/build/
+cvtracker/build2/
+
+# Docker
+*.tar.gz
+build/
+*.mkv
+*.engine
+
+# Git bundles are deploy artifacts (offline Jetson) — never track them.
+*.bundle
+
+# Camera calibration raw inputs and binaries are large and regenerable.
+# Only the small JSON outputs (calibration.json, stereo_calibration.json)
+# and the derived stereo_calib.json at the project root are tracked.
+camcalib/**/*.png
+camcalib/**/*.jpg
+camcalib/**/*.pkl
+camcalib/**/*.xml
+camcalib/**/detected/

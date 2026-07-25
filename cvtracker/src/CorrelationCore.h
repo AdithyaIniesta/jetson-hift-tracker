@@ -1,0 +1,128 @@
+#pragma once
+#include <complex>
+#include <cstdint>
+#include <vector>
+#include "Fft.h"
+
+namespace cr {
+namespace vtracker {
+
+/// Adaptive correlation filter core (MOSSE-style, FFT based).
+///
+/// Robustness measures:
+/// - log + zero-mean/unit-norm preprocessing -> invariance to global
+///   illumination changes (gain and offset);
+/// - capture-time training on rotated / scaled perturbations of the
+///   reference -> tolerance to object orientation changes;
+/// - adaptive pattern update weighted by detection confidence -> the
+///   pattern follows gradual appearance changes but is not corrupted
+///   during occlusions (update is suppressed at low confidence).
+class CorrelationCore
+{
+public:
+    struct Result
+    {
+        /// Peak displacement from window center, pixels (subpixel).
+        float dx{0.0f};
+        float dy{0.0f};
+        /// Peak value of correlation surface.
+        float peak{0.0f};
+        /// Peak-to-sidelobe ratio.
+        float psr{0.0f};
+        /// Detection probability [0..1]. Compensated for the known cosine
+        /// window attenuation at the peak position, so an off-center object
+        /// scores comparably to a centered one (essential for LOST-mode
+        /// off-center probing).
+        float prob{0.0f};
+        /// Cosine window attenuation at the peak position [0..1].
+        float attn{1.0f};
+        /// True when this result came from the capture-time snapshot
+        /// filter (detectBest only). The caller should then
+        /// restoreSnapshot() before resuming TRACKING, otherwise the next
+        /// frame correlates with the decayed adaptive filter and the lock
+        /// is immediately lost again.
+        bool snapshot{false};
+    };
+
+    /// Initialize for given window size (power of two) and FFT backend.
+    void init(int w, int h, FftBackend* fft);
+
+    /// Set object (tracking rectangle) size in window pixels. Defines the
+    /// width of the gaussian response label.
+    void setObjectSize(float rectW, float rectH);
+
+    /// Capture object: train filter on window (raw luma, w*h floats, object
+    /// centered) and on a set of rotated/scaled perturbations.
+    void capture(const std::vector<float>& window);
+
+    /// Correlate window with the adaptive filter. Does not modify the filter.
+    Result detect(const std::vector<float>& window);
+
+    /// Correlate window with BOTH the adaptive filter and the capture-time
+    /// snapshot filter (one shared window FFT), returning the better
+    /// result. Used for LOST-mode re-detection: the adaptive filter may
+    /// have decayed toward an occluder/background during the confidence
+    /// drop that preceded the loss, while the snapshot is guaranteed to
+    /// match the object as captured. Does not modify either filter.
+    Result detectBest(const std::vector<float>& window);
+
+    /// Update filter and reference image with window (object centered).
+    void update(const std::vector<float>& window, float rate);
+
+    /// Restore the adaptive filter from the capture-time snapshot. Call
+    /// after a re-capture that was won by the snapshot filter (see
+    /// Result::snapshot) so TRACKING resumes with the filter that
+    /// actually matched the object.
+    void restoreSnapshot();
+
+    bool initialized() const { return m_initialized; }
+    int width() const { return m_w; }
+    int height() const { return m_h; }
+
+    /// Running average of aligned raw windows (reference image of object).
+    const std::vector<float>& referenceImage() const { return m_ref; }
+    /// Last correlation surface (real part, normalized response).
+    const std::vector<float>& responseSurface() const { return m_resp; }
+
+    /// Estimate object mask from reference image: pixels that differ from
+    /// background (window border statistics). mask: w*h bytes (0/255).
+    void objectMask(std::vector<uint8_t>& mask) const;
+
+private:
+    using cf = std::complex<float>;
+
+    void preprocess(const float* in, std::vector<cf>& out) const;
+    void makeLabel(float sigmaX, float sigmaY);
+    void trainAccumulate(const std::vector<float>& window, float weight);
+    /// Correlate the prepared window FFT (m_winFft) against filter (A, B).
+    Result correlateWith(const std::vector<cf>& A, const std::vector<cf>& B);
+    static void affineSample(const std::vector<float>& src, int w, int h,
+                             float angleDeg, float scale,
+                             std::vector<float>& dst);
+
+    int m_w{0};
+    int m_h{0};
+    FftBackend* m_fft{nullptr};
+    bool m_initialized{false};
+    float m_lambda{0.01f};
+    // PSR sidelobe exclusion half-widths, derived from the label sigma in
+    // setObjectSize() so the excluded region always covers the trained
+    // response main lobe.
+    int m_exclX{5};
+    int m_exclY{5};
+
+    std::vector<float> m_hann;   // cosine window
+    std::vector<cf> m_G;         // FFT of gaussian label
+    std::vector<cf> m_A;         // numerator accumulator (adaptive)
+    std::vector<cf> m_B;         // denominator accumulator (adaptive)
+    std::vector<cf> m_Acap;      // capture-time snapshot of m_A
+    std::vector<cf> m_Bcap;      // capture-time snapshot of m_B
+    bool m_hasSnapshot{false};
+    std::vector<cf> m_winFft;    // FFT of the current preprocessed window
+    std::vector<cf> m_buf;       // work buffer (response)
+    std::vector<float> m_ref;    // reference image (running average)
+    std::vector<float> m_resp;   // last response surface
+};
+
+} // namespace vtracker
+} // namespace cr

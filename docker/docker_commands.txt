@@ -1,0 +1,10 @@
+docker run --rm --runtime nvidia --device /dev/video0 --device /dev/ttyTHS0 jvp/jetsontracker:v1.0-jp5-orin-xavier /opt/jvp/bin/JetsonTracker 192.168.0.100 5000 5001 1280 720 /dev/ttyTHS0 /dev/video0
+
+
+docker run --rm --runtime nvidia --device /dev/video0 --device /dev/ttyTHS0 jvp/jetsontracker:v1.0-jp5-orin-xavier /opt/jvp/bin/JetsonTracker 192.168.0.100 5000 5001 1280 720 /dev/ttyTHS0 /dev/video0
+
+// Latest for algorithm slection 
+docker run --rm -it --runtime nvidia --network host --device /dev/video0 --device /dev/ttyTHS0 jvp/jetsontracker:v2.0-jp5-orin-xavier /opt/jvp/run_docker.sh
+
+// powershell
+gst-launch-1.0 udpsrc port=5000 caps="application/x-rtp,encoding-name=H264,payload=96" ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! autovideosink sync=false

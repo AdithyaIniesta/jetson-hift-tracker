@@ -1,0 +1,73 @@
+============================================================
+JETSON TRACKER SETUP / RECOVERY
+Branch: feature/stream-reliability
+============================================================
+
+Go to repository
+  cd /home/ids-nvidia/Downloads/jetson-tracking-perception
+
+Switch to correct branch
+  git switch feature/stream-reliability
+
+Verify current branch
+  git branch
+  Expected:
+    adithya/jetson-tracker
+    feature/mkv-recording
+  * feature/stream-reliability
+    feature/uyvy-streaming
+    main
+    telemetry/mkv-recoding
+
+------------------------------------------------------------
+Verify latest commits
+------------------------------------------------------------
+  git log --oneline
+  Expected:
+    c0178fd  feat: restore telemetry commits via merge
+    30140eb  fix: use c_str() for CONFIG_FILE in printf calls
+    3f22945  fix: derive tracker_params.cfg path from HOME env
+  Press q to exit.
+
+------------------------------------------------------------
+Check repository status
+------------------------------------------------------------
+  git status
+  git branch
+
+------------------------------------------------------------
+Clean rebuild
+------------------------------------------------------------
+  cd /home/ids-nvidia/Downloads/jetson-tracking-perception
+  git switch feature/stream-reliability
+  cd build
+  pwd
+  sudo rm -rf *
+  cd ..
+  ./build.sh
+  ./run.sh
+
+------------------------------------------------------------
+If files are accidentally deleted
+------------------------------------------------------------
+  git restore .
+  NOTE: restores committed files only.
+  If build/ is missing, just run ./build.sh
+
+------------------------------------------------------------
+View stream on PC
+------------------------------------------------------------
+  gst-launch-1.0 udpsrc port=5000 \
+    caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \
+    ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false
+
+------------------------------------------------------------
+Sync repository with remote (requires internet)
+------------------------------------------------------------
+  cd /home/ids-nvidia/Downloads/jetson-tracking-perception
+  git fetch origin
+  git reset --hard origin/feature/stream-reliability
+  git log --oneline | head -3
+  Expected: c0178fd  feat: restore telemetry commits via merge
+
+============================================================

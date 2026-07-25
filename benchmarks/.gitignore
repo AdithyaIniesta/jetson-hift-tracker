@@ -1,0 +1,4 @@
+# Benchmark outputs never enter git.
+results/
+*.pyc
+__pycache__/

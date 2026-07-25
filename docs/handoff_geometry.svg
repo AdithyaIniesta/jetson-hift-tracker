@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <text x="500" y="36" text-anchor="middle" font-size="20" font-weight="bold">Stereo Handoff Geometry</text>
+
+  <!-- Object point P (moved right, out of everything else) -->
+  <circle cx="880" cy="360" r="9" fill="#1e8e3e"/>
+  <text x="880" y="345" text-anchor="middle" font-weight="bold" fill="#1e8e3e">P</text>
+
+  <!-- ============================ BORESIGHT (top) ============================ -->
+  <!-- Camera center -->
+  <circle cx="120" cy="220" r="7" fill="#2f6fb5"/>
+  <text x="120" y="205" text-anchor="middle" fill="#2f6fb5" font-weight="bold">C_L</text>
+  <text x="120" y="185" text-anchor="middle" fill="#2f6fb5" font-size="12">boresight</text>
+
+  <!-- Image plane -->
+  <rect x="220" y="140" width="240" height="170" fill="none" stroke="#2f6fb5" stroke-width="1.6"/>
+  <text x="340" y="130" text-anchor="middle" fill="#2f6fb5" font-size="12">image plane L</text>
+
+  <!-- Principal point -->
+  <circle cx="340" cy="225" r="3" fill="#2f6fb5"/>
+
+  <!-- Ray from C_L through P1 to P -->
+  <line x1="120" y1="220" x2="880" y2="360" stroke="#2f6fb5" stroke-width="0.9" stroke-dasharray="2,3" opacity="0.55"/>
+
+  <!-- Epipolar line of P2 drawn ACROSS the L image plane -->
+  <line x1="230" y1="260" x2="450" y2="180" stroke="#b0374a" stroke-width="2" stroke-dasharray="7,4"/>
+  <text x="230" y="325" fill="#b0374a" font-size="12">epipolar line of P₂</text>
+
+  <!-- P1 marker on the image plane (on the ray) -->
+  <circle cx="380" cy="207" r="6" fill="#1e8e3e"/>
+  <text x="392" y="204" fill="#1e8e3e" font-weight="bold">P₁</text>
+
+  <!-- ============================ DEPRESSION (bottom) ============================ -->
+  <circle cx="120" cy="520" r="7" fill="#b0374a"/>
+  <text x="120" y="545" text-anchor="middle" fill="#b0374a" font-weight="bold">C_R</text>
+  <text x="120" y="565" text-anchor="middle" fill="#b0374a" font-size="12">depression</text>
+
+  <rect x="220" y="410" width="240" height="170" fill="none" stroke="#b0374a" stroke-width="1.6"/>
+  <text x="340" y="600" text-anchor="middle" fill="#b0374a" font-size="12">image plane R</text>
+
+  <circle cx="340" cy="495" r="3" fill="#b0374a"/>
+
+  <!-- Ray from C_R through P2 to P -->
+  <line x1="120" y1="520" x2="880" y2="360" stroke="#b0374a" stroke-width="0.9" stroke-dasharray="2,3" opacity="0.55"/>
+
+  <!-- Epipolar line of P1 across the R image plane -->
+  <line x1="230" y1="450" x2="450" y2="540" stroke="#2f6fb5" stroke-width="2" stroke-dasharray="7,4"/>
+  <text x="230" y="435" fill="#2f6fb5" font-size="12">epipolar line of P₁  (search band)</text>
+
+  <!-- Homography seed (approximate — placed near true P2 but offset) -->
+  <circle cx="360" cy="502" r="6" fill="#e5a300"/>
+  <text x="360" y="490" text-anchor="middle" fill="#e5a300" font-weight="bold">seed</text>
+
+  <!-- True correspondence P2 -->
+  <circle cx="405" cy="522" r="6" fill="#1e8e3e"/>
+  <text x="418" y="518" fill="#1e8e3e" font-weight="bold">P₂</text>
+
+  <!-- Arrow from seed to P2 (DNN pick along the line) -->
+  <path d="M366 505 Q 385 512 400 520" stroke="#555" stroke-width="1.4" fill="none" marker-end="url(#arr)"/>
+  <text x="405" y="555" fill="#555" font-size="11">DNN template picks true P₂</text>
+
+  <!-- Baseline -->
+  <line x1="120" y1="230" x2="120" y2="510" stroke="#333" stroke-width="1.5"/>
+  <text x="80" y="375" text-anchor="middle" fill="#333" font-size="12">baseline t</text>
+
+  <!-- ============================ LEGEND (bottom) ============================ -->
+  <g transform="translate(80,660)">
+    <circle cx="8" cy="0" r="6" fill="#1e8e3e"/>
+    <text x="22" y="4" font-size="12">real target / correspondence</text>
+
+    <circle cx="240" cy="0" r="6" fill="#e5a300"/>
+    <text x="254" y="4" font-size="12">homography seed (approximate)</text>
+
+    <line x1="470" y1="0" x2="500" y2="0" stroke="#b0374a" stroke-width="2" stroke-dasharray="7,4"/>
+    <text x="510" y="4" font-size="12">epipolar line</text>
+
+    <line x1="620" y1="0" x2="650" y2="0" stroke="#333" stroke-width="1.5"/>
+    <text x="660" y="4" font-size="12">stereo baseline</text>
+
+    <line x1="770" y1="0" x2="800" y2="0" stroke="#2f6fb5" stroke-width="0.9" stroke-dasharray="2,3"/>
+    <text x="810" y="4" font-size="12">optical ray to P</text>
+  </g>
+</svg>

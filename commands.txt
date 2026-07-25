@@ -1,0 +1,9 @@
+cmake -B ~/JetsonTracker2048/build ~/JetsonTracker2048
+make -C ~/JetsonTracker2048/build -j2
+./bin/JetsonTracker 192.168.0.5 5000 5001 1920 1080 /dev/ttyTHS0 /dev/video0
+
+
+On windows powershell, run 
+gst-launch-1.0 udpsrc port=5000 caps="application/x-rtp,encoding-name=H264,payload=96" ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! autovideosink sync=false
+
+~/JetsonTracker2048/build/bin/JetsonTracker 192.168.0.100 5000 5001 1280 720 /dev/ttyTHS0 /dev/video0
