@@ -99,9 +99,9 @@ void rawStreamWorker(DualRingBuffer &ring, GstElement *src, int camera_id,
 // Pushes annotated frame to active src.
 // Sends UART angle offsets and UDP telemetry every frame.
 void outputThread(int camera_id,
-                  cr::vtracker::CvTracker &self_tracker,
+                  cr::vtracker::AppTracker &self_tracker,
                   std::mutex &self_mtx,
-                  cr::vtracker::CvTracker &peer_tracker,
+                  cr::vtracker::AppTracker &peer_tracker,
                   std::mutex &peer_mtx,
                   std::vector<ResultSlot> &resultQueue,
                   std::mutex &resultMtx,

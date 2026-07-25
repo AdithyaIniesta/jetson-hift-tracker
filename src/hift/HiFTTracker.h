@@ -15,7 +15,9 @@
 #include <string>
 #include <vector>
 
-#include "VTracker.h"
+#include <cvtracker/FeatureExtractor.h>
+#include <cvtracker/VTracker.h>
+
 #include "hift/TrtHiFT.h"
 
 namespace cr {
@@ -52,6 +54,27 @@ public:
     // these into the handoff path.
     bool exportTemplate(std::vector<unsigned char>& out) const;
     bool importTemplate(const std::vector<unsigned char>& in);
+
+    // ── CvTracker API-compat shims (so HiFTTracker is a drop-in for the
+    //    pipeline's concrete-type call sites) ─────────────────────────────
+    // HiFT self-verifies via its cls score, so there is no appearance
+    // extractor — this is a no-op accepted for source compatibility.
+    void setFeatureExtractor(
+        std::shared_ptr<cr::vtracker::FeatureExtractor> /*extractor*/) {}
+    // Handoff bank transfer maps to the HiFT template crop.
+    bool exportTemplateBank(std::vector<unsigned char>& out) const
+    {
+        return exportTemplate(out);
+    }
+    bool importTemplateBank(const std::vector<unsigned char>& in)
+    {
+        return importTemplate(in);
+    }
+    // Epipolar peak biasing is a correlation-filter concept; HiFT localizes
+    // via its own regression. Accepted as a no-op for now (Stage C+ may add
+    // an epipolar prior on the score map).
+    void setEpipolarConstraint(float /*a*/, float /*b*/, float /*c*/,
+                               float /*halfWidthPx*/, int /*ttlFrames*/) {}
 
     bool ready() const;
 

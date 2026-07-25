@@ -11,11 +11,24 @@
 #include <vector>
 
 #ifdef TRACKER_V2
-    #include <cvtracker/CvTracker.h> 
+    #include <cvtracker/CvTracker.h>
     #include <cvtracker/VTracker.h> // <--- USE THIS PATH
 #else
     #include "CvTracker.h"
     #include "VTracker.h"
+#endif
+
+// ── Active tracker type ──────────────────────────────────────────────────────
+// This fork replaces the correlation filter with HiFT. When built with
+// -DTRACKER_HIFT the global trackers are HiFTTracker; otherwise they stay
+// CvTracker. All shared signatures use cr::vtracker::AppTracker so the swap is
+// a single typedef. (HiFTTracker still relies on the cvtracker submodule for
+// the VTracker/Frame/FeatureExtractor base symbols.)
+#ifdef TRACKER_HIFT
+    #include "hift/HiFTTracker.h"
+    namespace cr { namespace vtracker { using AppTracker = cr::hift::HiFTTracker; } }
+#else
+    namespace cr { namespace vtracker { using AppTracker = CvTracker; } }
 #endif
 
 #include "dual/dual_capture.h"
@@ -235,8 +248,8 @@ extern std::atomic<bool> g_running;
 // tuning value that lives on both instances. Any new code that has
 // a concept of "which camera" MUST pick the correct _L / _R instance
 // explicitly.
-extern cr::vtracker::CvTracker g_tracker_L;   // boresight
-extern cr::vtracker::CvTracker g_tracker_R;   // depression
+extern cr::vtracker::AppTracker g_tracker_L;   // boresight
+extern cr::vtracker::AppTracker g_tracker_R;   // depression
 extern std::mutex g_mtx_L;
 extern std::mutex g_mtx_R;
 #define g_tracker g_tracker_L

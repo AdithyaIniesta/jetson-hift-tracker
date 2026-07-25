@@ -28,9 +28,9 @@ void rawStreamWorker(DualRingBuffer &ring, GstElement *src, int camera_id,
 // annotated_src : this camera's annotated recording appsrc (may be
 //                 null if this camera isn't the recording target)
 void outputThread(int camera_id,
-                  cr::vtracker::CvTracker &self_tracker,
+                  cr::vtracker::AppTracker &self_tracker,
                   std::mutex &self_mtx,
-                  cr::vtracker::CvTracker &peer_tracker,
+                  cr::vtracker::AppTracker &peer_tracker,
                   std::mutex &peer_mtx,
                   std::vector<ResultSlot> &resultQueue,
                   std::mutex &resultMtx,

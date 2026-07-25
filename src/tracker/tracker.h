@@ -27,7 +27,7 @@
 // ring      : the ring buffer for THIS camera (left_ring or right_ring)
 // resultQueue etc. : per-camera output pipeline
 void trackerThread(int camera_id,
-                   cr::vtracker::CvTracker &tracker,
+                   cr::vtracker::AppTracker &tracker,
                    std::mutex &tracker_mtx,
                    DualRingBuffer &ring,
                    std::vector<ResultSlot> &resultQueue,

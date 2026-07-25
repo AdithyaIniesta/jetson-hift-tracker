@@ -3,10 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
-#include "Frame.h"
+#include <cvtracker/Frame.h>
 
 namespace cr {
 namespace hift {

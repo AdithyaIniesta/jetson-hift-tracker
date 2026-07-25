@@ -46,8 +46,8 @@
 // macro aliases for g_tracker_L / g_mtx_L (see common/globals.h), so
 // legacy call sites that read tuning still compile; SET_PARAM in
 // control.cpp broadcasts to BOTH trackers.
-cr::vtracker::CvTracker g_tracker_L;
-cr::vtracker::CvTracker g_tracker_R;
+cr::vtracker::AppTracker g_tracker_L;
+cr::vtracker::AppTracker g_tracker_R;
 std::mutex g_mtx_L;
 std::mutex g_mtx_R;
 std::atomic<int> g_frameId{0};

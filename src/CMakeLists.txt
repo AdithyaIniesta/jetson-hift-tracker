@@ -33,6 +33,17 @@ if(TRACKER_ENGINE_DIR STREQUAL "cvtracker-lockon")
     list(FILTER SOURCES EXCLUDE REGEX "filters/ekf/Ekf\\.cpp$")
 endif()
 
+# ── HiFT tracker engine (this fork) ──────────────────────────
+# ENABLE_HIFT swaps the global tracker to cr::hift::HiFTTracker (see
+# common/globals.h). The src/hift/*.cpp TUs need TensorRT + CUDA and the
+# real TrtHiFT path (CVTRACKER_WITH_TENSORRT). When OFF, keep the HiFT
+# sources out of the build entirely so a plain CF build has no TRT-in-app
+# dependency.
+option(ENABLE_HIFT "Replace the correlation-filter tracker with HiFT" OFF)
+if(NOT ENABLE_HIFT)
+    list(FILTER SOURCES EXCLUDE REGEX "/hift/")
+endif()
+
 add_executable(${EXE_NAME} ${SOURCES})
 # Force the output directory for this specific target
 set_target_properties(${EXE_NAME} PROPERTIES
@@ -98,6 +109,28 @@ target_include_directories(${EXE_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/${TRACKER_ENGINE_DIR}/src"   # <--- THIS IS THE KEY
     "${CMAKE_SOURCE_DIR}/${TRACKER_ENGINE_DIR}/include"
 )
+
+# ── HiFT: define the swap + attach TensorRT/CUDA to the app target ──────────
+if(ENABLE_HIFT)
+    message(STATUS "-> HiFT tracker ENABLED (replacing correlation filter)")
+    target_compile_definitions(${EXE_NAME} PRIVATE TRACKER_HIFT CVTRACKER_WITH_TENSORRT)
+    find_path(HIFT_TRT_INCLUDE NvInfer.h
+        HINTS /usr/include/aarch64-linux-gnu /usr/include/x86_64-linux-gnu /usr/include)
+    find_path(HIFT_CUDA_INCLUDE cuda_runtime_api.h HINTS /usr/local/cuda/include)
+    find_library(HIFT_NVINFER_LIB nvinfer
+        HINTS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu)
+    find_library(HIFT_NVONNXPARSER_LIB nvonnxparser
+        HINTS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu)
+    find_library(HIFT_CUDART_LIB cudart HINTS /usr/local/cuda/lib64)
+    if(NOT HIFT_TRT_INCLUDE OR NOT HIFT_CUDA_INCLUDE OR NOT HIFT_NVINFER_LIB
+       OR NOT HIFT_NVONNXPARSER_LIB OR NOT HIFT_CUDART_LIB)
+        message(FATAL_ERROR "HiFT build needs TensorRT + CUDA (JetPack) — not found")
+    endif()
+    target_include_directories(${EXE_NAME} PRIVATE
+        ${HIFT_TRT_INCLUDE} ${HIFT_CUDA_INCLUDE})
+    target_link_libraries(${EXE_NAME} PRIVATE
+        ${HIFT_NVINFER_LIB} ${HIFT_NVONNXPARSER_LIB} ${HIFT_CUDART_LIB})
+endif()
 
 find_package(OpenMP)
 find_package(OpenCV REQUIRED)

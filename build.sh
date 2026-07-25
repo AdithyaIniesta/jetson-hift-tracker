@@ -19,6 +19,7 @@ echo -e "${CYAN}   [2] cuda_library${NC}"
 echo -e "${CYAN}   [3] both${NC}"
 echo -e "${CYAN}   [4] lockon (cvtracker-lockon engine)${NC}"
 echo -e "${CYAN}   [5] all three${NC}"
+echo -e "${CYAN}   [6] hift (HiFT tracker — replaces correlation filter)${NC}"
 echo -e "${CYAN}==========================================${NC}"
 echo ""
 
@@ -37,7 +38,7 @@ fi
 
 echo -e "${CYAN}==========================================${NC}"
 echo ""
-read -p "Select [1/2/3/4/5]: " choice
+read -p "Select [1/2/3/4/5/6]: " choice
 
 echo ""
 echo -e "${YELLOW}Clearing build/ for a fully clean build...${NC}"
@@ -48,6 +49,8 @@ build_one() {
     # Which vendored engine directory provides the `cvtracker` target.
     # Baseline builds use cvtracker/; the lockon build uses cvtracker-lockon/.
     local ENGINE_DIR=${2:-cvtracker}
+    # Extra cmake flags (e.g. -DENABLE_HIFT=ON for the HiFT build).
+    local EXTRA_FLAGS=${3:-}
 
     # Map the text tracking variant directly to our updated CMake option toggle
     local TOGGLE_VAL="OFF"
@@ -77,6 +80,7 @@ build_one() {
           -DJETSON_BOARD:STRING=${BOARD} \
           -DTRACKER_VERSION:STRING=${VERSION} \
           -DTRACKER_ENGINE_DIR:STRING=${ENGINE_DIR} \
+          ${EXTRA_FLAGS} \
           "$(dirname "$0")"
 
     make -C "$(dirname "$0")/build" -j$(nproc)
@@ -88,6 +92,7 @@ case $choice in
     3) build_one constant_robotics_lib && build_one cuda_library ;;
     4) build_one lockon cvtracker-lockon ;;
     5) build_one constant_robotics_lib && build_one cuda_library && build_one lockon cvtracker-lockon ;;
+    6) build_one hift cvtracker "-DENABLE_HIFT=ON" ;;
     *) echo -e "${RED}Invalid selection.${NC}"; exit 1 ;;
 esac
 

@@ -49,8 +49,17 @@ Box post-processing (getcentercuda) ported to C++.
       get_subwindow crop (YUV→BGR sampler for all fourccs), generate_anchor box decode,
       scale/ratio penalty + cosine window + argmax, lr smoothing, FREE/TRACKING/LOST mode
       machine, exportTemplate/importTemplate for handoff. Raw BGR CHW 0..255 (no norm).
-- [ ] Phase 3 Stage C: integrate — main.cpp select, CMakeLists, build.sh option, handoff
-      HiFT-template transfer wiring. THEN build on Jetson + GUI test.
+- [x] Phase 3 Stage C: integrate — `AppTracker` typedef swap in common/globals.h (gated by
+      -DTRACKER_HIFT), all shared signatures (main/tracker/streaming/control) on AppTracker,
+      HiFTTracker CvTracker-compat shims (setFeatureExtractor no-op, template-bank ->
+      HiFT template, epipolar no-op), src/CMakeLists ENABLE_HIFT (TRT/CUDA + defines),
+      build.sh option [6]. NEXT: build on Jetson (option 6) + iterate compile errors + GUI test.
+
+## Build & run (Jetson)
+1. Export ONNX (once):  python3 tools/export_hift.py --snapshot models/first.pth --config hift/experiments/config.yaml
+2. Build:  ./build.sh  → choose [6] hift   (first run builds TRT engines from ONNX; minutes)
+3. Run the cuda_library run-script but point it at the hift binary (JetsonTracker_hift_orin),
+   optionally TRACKER_VERIFIER=none. Then test capture + handoff from the GUI.
 
 ### Ported HiFT constants (hift/experiments/config.yaml → src/hift/TrtHiFT.h)
 EXEMPLAR 127, SEARCH 287, OUTPUT 11×11, ANCHOR_STRIDE 16, CONTEXT 0.5,

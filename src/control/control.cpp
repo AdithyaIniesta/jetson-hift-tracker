@@ -391,7 +391,7 @@ void controlThread(int port, int camera_id, const char *device_path) {
           g_rec = new FlightRecorder(info);
 
           TrackerConfig tcfg;
-          tcfg.version = CvTracker::getVersion();
+          tcfg.version = cr::vtracker::AppTracker::getVersion();
           tcfg.rect_width = (int)g_tracker.getParam(VTrackerParam::RECT_WIDTH);
           tcfg.rect_height =
               (int)g_tracker.getParam(VTrackerParam::RECT_HEIGHT);
