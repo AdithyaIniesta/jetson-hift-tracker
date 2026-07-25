@@ -41,6 +41,19 @@ Box post-processing (getcentercuda) ported to C++.
 
 ## Status
 - [x] Fork created (base 7170763), build/ + old git stripped, fresh `main`.
-- [ ] Phase 0: pretrained HiFT standalone benchmark (needs general_model.pth).
-- [ ] Phase 1: ONNX export (tools/export_hift.py scaffold in place).
-- [ ] Phase 2/3: TRT engines + C++ HiFTTracker.
+- [x] Phase 0/2 gate: trtexec track branch 147 fps / 6.8 ms (dual-cam ~73 fps > 45). PASS.
+- [x] Phase 1: ONNX export (tools/export_hift.py → hift_template.onnx + hift_track.onnx).
+- [x] Phase 3 Stage A: `TrtHiFT` engine wrapper (src/hift/TrtHiFT.{h,cpp}) — two engines,
+      shared zf GPU buffers, setTemplate()/track(). TRT 8.5 enqueueV2 path.
+- [ ] Phase 3 Stage B: `HiFTTracker` (VTracker impl) — get_subwindow crop, generate_anchor
+      box decode, penalty/window/argmax, lr smoothing, mode machine.
+- [ ] Phase 3 Stage C: integrate — main.cpp select, CMakeLists, build.sh option, handoff
+      HiFT-template transfer.
+
+### Ported HiFT constants (hift/experiments/config.yaml → src/hift/TrtHiFT.h)
+EXEMPLAR 127, SEARCH 287, OUTPUT 11×11, ANCHOR_STRIDE 16, CONTEXT 0.5,
+PENALTY_K 0.08, WINDOW_INFLUENCE 0.42, LR 0.30, w2/w3 1.0, decode_scale 143, anchor_off 63.
+
+### Engine I/O (record for box post-processing)
+template: z[1,3,127,127] → zf0[1,384,10,10], zf1[1,384,8,8], zf2[1,256,6,6]
+track:    x[1,3,287,287] + zf0..2 → loc[1,4,11,11], cls1[1,2,11,11], cls2[1,1,11,11]
