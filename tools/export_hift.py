@@ -74,44 +74,51 @@ def main():
     load_weights_cpu(model, args.snapshot)
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # --- template branch: z -> zf ---
+    # The AlexNet backbone returns a TUPLE of feature maps (HiFT uses hierarchical
+    # features); the grader indexes x[0..2] / z[0..2]. Export handles N tensors.
+
+    # --- template branch: z -> zf0..zf{N-1} ---
     class TemplateBranch(nn.Module):
         def __init__(self, m):
             super().__init__()
             self.backbone = m.backbone
         def forward(self, z):
-            return self.backbone(z)
+            return self.backbone(z)      # tuple of feature maps
 
     tmpl = TemplateBranch(model).eval()
     z = torch.randn(1, 3, exemplar, exemplar)
     with torch.no_grad():
         zf = tmpl(z)
-    print("zf shape:", tuple(zf.shape))
+    zf_list = list(zf) if isinstance(zf, (tuple, list)) else [zf]
+    n = len(zf_list)
+    zf_names = ["zf%d" % i for i in range(n)]
+    print("zf: %d tensors, shapes: %s" % (n, [tuple(t.shape) for t in zf_list]))
     torch.onnx.export(
         tmpl, z, os.path.join(args.out_dir, "hift_template.onnx"),
-        input_names=["z"], output_names=["zf"], opset_version=args.opset,
+        input_names=["z"], output_names=zf_names, opset_version=args.opset,
         do_constant_folding=True, dynamo=False)
     print("wrote hift_template.onnx")
 
-    # --- track branch: (x, zf) -> loc, cls1, cls2 ---
+    # --- track branch: (x, zf0..zf{N-1}) -> loc, cls1, cls2 ---
     class TrackBranch(nn.Module):
         def __init__(self, m):
             super().__init__()
             self.backbone = m.backbone
             self.grader = m.grader
-        def forward(self, x, zf):
+        def forward(self, x, *zfs):
             xf = self.backbone(x)
-            loc, cls1, cls2 = self.grader(xf, zf)
+            loc, cls1, cls2 = self.grader(xf, list(zfs))
             return loc, cls1, cls2
 
     trk = TrackBranch(model).eval()
     x = torch.randn(1, 3, search, search)
     with torch.no_grad():
-        loc, cls1, cls2 = trk(x, zf)
-    print("loc/cls1/cls2 shapes:", tuple(loc.shape), tuple(cls1.shape), tuple(cls2.shape))
+        loc, cls1, cls2 = trk(x, *zf_list)
+    print("loc/cls1/cls2 shapes:", tuple(loc.shape), tuple(cls1.shape),
+          tuple(cls2.shape))
     torch.onnx.export(
-        trk, (x, zf), os.path.join(args.out_dir, "hift_track.onnx"),
-        input_names=["x", "zf"], output_names=["loc", "cls1", "cls2"],
+        trk, (x, *zf_list), os.path.join(args.out_dir, "hift_track.onnx"),
+        input_names=["x"] + zf_names, output_names=["loc", "cls1", "cls2"],
         opset_version=args.opset, do_constant_folding=True, dynamo=False)
     print("wrote hift_track.onnx")
 
