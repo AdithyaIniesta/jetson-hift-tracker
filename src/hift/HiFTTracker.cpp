@@ -4,7 +4,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 
 #include <cvtracker/Frame.h>
@@ -129,6 +131,43 @@ void pixelYuv(const cr::video::Frame& f, int x, int y, float& Y, float& U,
     }
 }
 
+// Debug: write a CHW-BGR float crop (side S, values 0..255) to a PPM (P6, RGB)
+// so the operator can eyeball whether the color/format handed to HiFT is right.
+// Enabled only when the env var TRACKER_HIFT_DUMP is set. Also logs the per-
+// channel mean (a quick sanity check on range: expect ~0..255, not 0..1).
+void dumpCropPpm(const char* path, const std::vector<float>& chw, int S)
+{
+    const int plane = S * S;
+    double mb = 0, mg = 0, mr = 0;
+    std::ofstream f(path, std::ios::binary);
+    if (!f)
+    {
+        std::fprintf(stderr, "[hift/dump] cannot open %s\n", path);
+        return;
+    }
+    f << "P6\n" << S << " " << S << "\n255\n";
+    std::vector<unsigned char> row(3 * plane);
+    for (int j = 0; j < plane; ++j)
+    {
+        const float b = chw[j];
+        const float g = chw[plane + j];
+        const float r = chw[2 * plane + j];
+        mb += b;
+        mg += g;
+        mr += r;
+        auto cl = [](float v) {
+            return (unsigned char)std::min(255.0f, std::max(0.0f, v));
+        };
+        row[3 * j + 0] = cl(r);  // PPM is RGB
+        row[3 * j + 1] = cl(g);
+        row[3 * j + 2] = cl(b);
+    }
+    f.write((const char*)row.data(), (std::streamsize)row.size());
+    std::fprintf(stderr,
+                 "[hift/dump] wrote %s (%dx%d) mean BGR = %.1f %.1f %.1f\n",
+                 path, S, S, mb / plane, mg / plane, mr / plane);
+}
+
 }  // namespace
 
 struct HiFTTracker::Impl
@@ -149,6 +188,7 @@ struct HiFTTracker::Impl
     float scaleaa{0.0f};        // s_z captured for large-object clamp
     int lostCounter{0};
     bool haveTemplate{false};
+    bool dumpSearchPending{false};
 
     int frameW{0}, frameH{0};
 
@@ -269,6 +309,11 @@ struct HiFTTracker::Impl
         scaleaa = sz;
 
         buildCrop(frame, cx, cy, (int)sz, HIFT_EXEMPLAR, zBuf);
+        if (std::getenv("TRACKER_HIFT_DUMP"))
+        {
+            dumpCropPpm("hift_template.ppm", zBuf, HIFT_EXEMPLAR);
+            dumpSearchPending = true;
+        }
         if (engine.setTemplate(zBuf.data()))
         {
             templateCrop = zBuf;
@@ -298,6 +343,11 @@ struct HiFTTracker::Impl
         const float sx = sz * ((float)HIFT_SEARCH / (float)HIFT_EXEMPLAR);
 
         buildCrop(frame, cx, cy, (int)std::round(sx), HIFT_SEARCH, xBuf);
+        if (dumpSearchPending)
+        {
+            dumpSearchPending = false;
+            dumpCropPpm("hift_search.ppm", xBuf, HIFT_SEARCH);
+        }
 
         HiFTTrackOut o;
         if (!engine.track(xBuf.data(), o))
