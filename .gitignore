@@ -32,3 +32,4 @@ camcalib/**/*.jpg
 camcalib/**/*.pkl
 camcalib/**/*.xml
 camcalib/**/detected/
+

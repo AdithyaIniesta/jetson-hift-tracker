@@ -36,7 +36,8 @@ import torch.nn as nn
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hift-dir", default="../HiFT", help="path to the cloned HiFT repo")
+    ap.add_argument("--hift-dir", default="hift",
+                    help="path to the vendored HiFT model code (default: ./hift)")
     ap.add_argument("--snapshot", required=True, help="general_model.pth")
     ap.add_argument("--config", required=True, help="HiFT experiments config.yaml")
     ap.add_argument("--out-dir", default="models")
