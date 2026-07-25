@@ -45,10 +45,12 @@ Box post-processing (getcentercuda) ported to C++.
 - [x] Phase 1: ONNX export (tools/export_hift.py → hift_template.onnx + hift_track.onnx).
 - [x] Phase 3 Stage A: `TrtHiFT` engine wrapper (src/hift/TrtHiFT.{h,cpp}) — two engines,
       shared zf GPU buffers, setTemplate()/track(). TRT 8.5 enqueueV2 path.
-- [ ] Phase 3 Stage B: `HiFTTracker` (VTracker impl) — get_subwindow crop, generate_anchor
-      box decode, penalty/window/argmax, lr smoothing, mode machine.
+- [x] Phase 3 Stage B: `HiFTTracker` (VTracker impl, src/hift/HiFTTracker.{h,cpp}) —
+      get_subwindow crop (YUV→BGR sampler for all fourccs), generate_anchor box decode,
+      scale/ratio penalty + cosine window + argmax, lr smoothing, FREE/TRACKING/LOST mode
+      machine, exportTemplate/importTemplate for handoff. Raw BGR CHW 0..255 (no norm).
 - [ ] Phase 3 Stage C: integrate — main.cpp select, CMakeLists, build.sh option, handoff
-      HiFT-template transfer.
+      HiFT-template transfer wiring. THEN build on Jetson + GUI test.
 
 ### Ported HiFT constants (hift/experiments/config.yaml → src/hift/TrtHiFT.h)
 EXEMPLAR 127, SEARCH 287, OUTPUT 11×11, ANCHOR_STRIDE 16, CONTEXT 0.5,
