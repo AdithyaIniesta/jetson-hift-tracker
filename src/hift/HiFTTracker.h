@@ -26,8 +26,11 @@ namespace hift {
 struct HiFTTrackerConfig
 {
     TrtHiFTConfig trt;
-    // A track is considered lost when the fused cls score drops below this.
+    // A track is considered lost when the PSR-gated confidence drops below this.
     float lossThreshold = 0.25f;
+    // PSR (peak sharpness) at which confidence saturates. Higher = stricter loss
+    // detection. Tunable at runtime via TRACKER_HIFT_PSR.
+    float psrRef = 4.0f;
 };
 
 class HiFTTracker : public cr::vtracker::VTracker

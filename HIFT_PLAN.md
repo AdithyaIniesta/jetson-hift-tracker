@@ -67,6 +67,19 @@ softmax). Fixed three robustness issues in the mode-machine glue:
 - `TRACKER_HIFT_LOSS` env tunes the threshold without a rebuild.
 Root-cause test still pending on Jetson: `TRACKER_HIFT_DUMP=1` to verify the YUV→BGR crop.
 
+## Target-loss handling (2026-07-27) — in-FOV good, out-of-FOV was unstable
+HiFT has no "target absent" concept: when the ROI leaves FOV it locks onto clutter with
+high cls score (false confidence), never goes LOST, and the box drifts larger. Fixes:
+- **PSR peak-quality gate** — confidence = fg · min(1, PSR/psrRef). PSR (peak-to-sidelobe on
+  the fg map) is low when the response is diffuse (target gone), so confidence drops and the
+  box turns LOST. Tunable: `TRACKER_HIFT_PSR` (higher = stricter, LOST sooner).
+- **Freeze on low confidence** — below lossThreshold, hold the box (don't chase the clutter
+  peak that caused wander + enlargement); mode machine goes LOST.
+- **Hard size clamp** — box constrained to [0.4, 2.5]× the captured size, so the regressor
+  can't drift it large regardless.
+NOTE: PSR default (psrRef=4.0) may need tuning on-device; the size clamp works regardless.
+Still likely wants a DINOv2 re-detection/identity check for robust re-acquire after loss.
+
 ## Build & run (Jetson)
 1. Export ONNX (once):  python3 tools/export_hift.py --snapshot models/first.pth --config hift/experiments/config.yaml
 2. Build:  ./build.sh  → choose [6] hift   (first run builds TRT engines from ONNX; minutes)

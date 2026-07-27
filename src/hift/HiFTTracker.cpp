@@ -26,6 +26,11 @@ constexpr int MODE_LOST = 2;
 constexpr int MODE_INERTIAL = 3;
 constexpr int MODE_STATIC = 4;
 
+// Box size may not stray beyond this band around the captured size (stops the
+// HiFT regressor drifting the box larger when it locks onto clutter).
+constexpr float SIZE_MIN = 0.4f;
+constexpr float SIZE_MAX = 2.5f;
+
 // atanh with the HiFT clamp (dcon in hift_tracker.py), then loc decode scale.
 inline float dcon(float x)
 {
@@ -183,6 +188,7 @@ struct HiFTTracker::Impl
     // Track state (float, in full-frame pixels).
     float cx{0.0f}, cy{0.0f};   // center
     float bw{72.0f}, bh{72.0f}; // box size
+    float bw0{72.0f}, bh0{72.0f}; // captured size (size-clamp reference)
     float velX{0.0f}, velY{0.0f};
     float channelB{128.0f}, channelG{128.0f}, channelR{128.0f};
     float scaleaa{0.0f};        // s_z captured for large-object clamp
@@ -317,6 +323,8 @@ struct HiFTTracker::Impl
         cy = py;
         bw = (float)params.rectWidth;
         bh = (float)params.rectHeight;
+        bw0 = bw;   // remember capture size for the size clamp
+        bh0 = bh;
 
         computeChannelAverage(frame);
 
@@ -382,6 +390,10 @@ struct HiFTTracker::Impl
         int best = 0;
         float bestScore = 0.0f, bestPenalty = 0.0f, bestFg = 0.0f;
         float bbx = 0, bby = 0, bbw = 0, bbh = 0;
+        // Peak-quality (PSR) accumulators over the foreground map — HiFT's cls
+        // score stays high even when the target is gone (it locks onto clutter),
+        // so a sharp-single-peak test is what actually detects loss.
+        float maxFg = 0.0f, sumFg = 0.0f, sumFg2 = 0.0f;
 
         const float refW = bw * scaleZ;
         const float refH = bh * scaleZ;
@@ -410,6 +422,10 @@ struct HiFTTracker::Impl
             const float m = std::max(a0, a1);
             const float e0 = std::exp(a0 - m), e1 = std::exp(a1 - m);
             const float fg = e1 / (e0 + e1);              // bounded 0..1
+            sumFg += fg;
+            sumFg2 += fg * fg;
+            if (fg > maxFg)
+                maxFg = fg;
             const float score1 = fg * HIFT_W2;
             const float score2 = cls2[j] * HIFT_W3;       // cls2 is a raw logit
             const float score = (score1 + score2) * 0.5f;
@@ -437,6 +453,29 @@ struct HiFTTracker::Impl
         }
         (void)best;
 
+        // ── Peak-to-sidelobe ratio (PSR): is there ONE sharp peak (real target)
+        //    or a diffuse response (target gone → locked on clutter)? Exclude the
+        //    peak itself from the sidelobe stats. ─────────────────────────────
+        const float mean = (sumFg - maxFg) / (float)(P - 1);
+        float var = (sumFg2 - maxFg * maxFg) / (float)(P - 1) - mean * mean;
+        if (var < 1e-6f)
+            var = 1e-6f;
+        const float psr = (maxFg - mean) / std::sqrt(var);
+        // Confidence = foreground strength gated by peak sharpness. Both are high
+        // only when the target is genuinely present. This is what makes the box
+        // turn "LOST" (blue) and the reported probability drop when it leaves FOV.
+        const float psrConf = std::min(1.0f, psr / cfg.psrRef);
+        const float conf = bestFg * psrConf;
+
+        // Not confident → the target is likely out of view / occluded. FREEZE the
+        // box: do NOT chase the clutter peak (that is what wandered + enlarged the
+        // box). Position/size held at last-known; the mode machine goes LOST.
+        if (conf < cfg.lossThreshold)
+        {
+            velX = velY = 0.0f;
+            return conf;
+        }
+
         // Back to full-frame pixels.
         const float invSz = 1.0f / scaleZ;
         const float ox = bbx * invSz;
@@ -454,7 +493,11 @@ struct HiFTTracker::Impl
         float newW = bw * (1.0f - lr) + ow * lr;
         float newH = bh * (1.0f - lr) + oh * lr;
 
-        // Clip.
+        // Hard size clamp relative to the captured size — HiFT's regressor drifts
+        // the box larger over time; never let it stray far from what was captured.
+        newW = std::max(SIZE_MIN * bw0, std::min(newW, SIZE_MAX * bw0));
+        newH = std::max(SIZE_MIN * bh0, std::min(newH, SIZE_MAX * bh0));
+        // Frame clip.
         const float ncx = std::max(0.0f, std::min(newCx, (float)frame.width));
         const float ncy = std::max(0.0f, std::min(newCy, (float)frame.height));
         newW = std::max(10.0f, std::min(newW, (float)frame.width));
@@ -466,10 +509,7 @@ struct HiFTTracker::Impl
         cy = ncy;
         bw = newW;
         bh = newH;
-        // Return the BOUNDED foreground probability as the confidence, so the
-        // FREE/TRACKING/LOST machine's lossThreshold is meaningful (the fused
-        // `score` includes the unbounded cls2 logit and is not a 0..1 signal).
-        return bestFg;
+        return conf;
     }
 };
 
@@ -483,6 +523,14 @@ HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
         const float v = (float)atof(e);
         if (v > 0.0f && v < 1.0f)
             d_->cfg.lossThreshold = v;
+    }
+    // TRACKER_HIFT_PSR tunes loss sensitivity: higher = stricter (goes LOST
+    // sooner when the response gets diffuse).
+    if (const char* e = std::getenv("TRACKER_HIFT_PSR"))
+    {
+        const float v = (float)atof(e);
+        if (v > 0.5f && v < 50.0f)
+            d_->cfg.psrRef = v;
     }
     d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
