@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <mutex>
+#include <utility>
 
 #include <cvtracker/Frame.h>
 
@@ -211,6 +212,15 @@ struct HiFTTracker::Impl
     // Stored template crop for handoff export.
     std::vector<float> templateCrop;
 
+    // ── DINOv2 verifier state ────────────────────────────────────────────
+    std::shared_ptr<cr::vtracker::FeatureExtractor> extractor;
+    std::vector<float> bank;      // reference embedding (unit norm)
+    std::vector<float> grayBuf;   // reusable gray verifier crop
+    std::vector<float> embBuf;    // reusable embedding
+    int vetoStreak{0};
+    int sinceVerify{0};
+    int sinceRefresh{0};
+
     Impl()
     {
         const int N = HIFT_OUTPUT;
@@ -315,6 +325,78 @@ struct HiFTTracker::Impl
         }
     }
 
+    // ── Appearance verifier helpers ─────────────────────────────────────
+    // Grayscale (luminance) crop of the box region, resized to outSz x outSz,
+    // for the DINOv2 extractor (which resamples/normalizes internally).
+    void buildGrayCrop(const cr::video::Frame& frame, float pcx, float pcy,
+                       float boxW, float boxH, int outSz, std::vector<float>& out)
+    {
+        out.resize((size_t)outSz * outSz);
+        const float x0 = pcx - boxW * 0.5f;
+        const float y0 = pcy - boxH * 0.5f;
+        const float scx = boxW / (float)outSz;
+        const float scy = boxH / (float)outSz;
+        for (int oy = 0; oy < outSz; ++oy)
+        {
+            int sy = (int)std::lround(y0 + (oy + 0.5f) * scy);
+            sy = std::max(0, std::min(sy, frame.height - 1));
+            for (int ox = 0; ox < outSz; ++ox)
+            {
+                int sx = (int)std::lround(x0 + (ox + 0.5f) * scx);
+                sx = std::max(0, std::min(sx, frame.width - 1));
+                float Y, U, V;
+                pixelYuv(frame, sx, sy, Y, U, V);
+                out[(size_t)oy * outSz + ox] = Y;  // luminance
+            }
+        }
+    }
+
+    bool computeEmbedding(const cr::video::Frame& frame, float pcx, float pcy,
+                          float boxW, float boxH, std::vector<float>& emb)
+    {
+        if (!extractor)
+            return false;
+        buildGrayCrop(frame, pcx, pcy, boxW, boxH, extractor->inputSize(),
+                      grayBuf);
+        return extractor->extract(grayBuf.data(), emb);
+    }
+
+    static void normalize(std::vector<float>& v)
+    {
+        double s = 0.0;
+        for (float x : v)
+            s += (double)x * x;
+        const float inv = 1.0f / ((float)std::sqrt(s) + 1e-6f);
+        for (float& x : v)
+            x *= inv;
+    }
+
+    static float cosine(const std::vector<float>& a, const std::vector<float>& b)
+    {
+        if (a.size() != b.size() || a.empty())
+            return 0.0f;
+        double dot = 0.0, na = 0.0, nb = 0.0;
+        for (size_t i = 0; i < a.size(); ++i)
+        {
+            dot += (double)a[i] * b[i];
+            na += (double)a[i] * a[i];
+            nb += (double)b[i] * b[i];
+        }
+        return (float)(dot / (std::sqrt(na) * std::sqrt(nb) + 1e-9));
+    }
+
+    // Re-run HiFT's template branch on the current box (adaptation). Caller
+    // must gate this on a confident + verifier-confirmed frame.
+    void refreshTemplate(const cr::video::Frame& frame)
+    {
+        const float wz = bw + HIFT_CONTEXT * (bw + bh);
+        const float hz = bh + HIFT_CONTEXT * (bw + bh);
+        const float sz = std::round(std::sqrt(wz * hz));
+        buildCrop(frame, cx, cy, (int)sz, HIFT_EXEMPLAR, zBuf);
+        if (engine.setTemplate(zBuf.data()))
+            templateCrop = zBuf;
+    }
+
     void doCapture(const cr::video::Frame& frame)
     {
         float px = capX, py = capY;
@@ -347,6 +429,16 @@ struct HiFTTracker::Impl
             mode = MODE_TRACKING;
             lostCounter = 0;
             velX = velY = 0.0f;
+            // Seed the appearance verifier with the captured target.
+            vetoStreak = 0;
+            sinceVerify = 0;
+            sinceRefresh = 0;
+            bank.clear();
+            if (extractor && computeEmbedding(frame, cx, cy, bw, bh, embBuf))
+            {
+                bank = embBuf;
+                normalize(bank);
+            }
         }
         else
         {
@@ -540,6 +632,13 @@ HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
         if (v >= 0.0f && v < 0.95f)
             d_->cfg.windowInf = v;
     }
+    // TRACKER_HIFT_SIM: verifier cosine-similarity veto threshold (0..1).
+    if (const char* e = std::getenv("TRACKER_HIFT_SIM"))
+    {
+        const float v = (float)atof(e);
+        if (v > 0.0f && v < 1.0f)
+            d_->cfg.simThreshold = v;
+    }
     d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
         std::fprintf(stderr, "[hift] engine init FAILED — tracker inert\n");
@@ -549,6 +648,17 @@ HiFTTracker::~HiFTTracker() = default;
 
 std::string HiFTTracker::getVersion() { return "hift-1.0.0"; }
 bool HiFTTracker::ready() const { return d_->engineReady; }
+
+void HiFTTracker::setFeatureExtractor(
+    std::shared_ptr<cr::vtracker::FeatureExtractor> extractor)
+{
+    std::lock_guard<std::mutex> lk(d_->mtx);
+    d_->extractor = std::move(extractor);
+    d_->bank.clear();      // reference is re-seeded on the next CAPTURE
+    d_->vetoStreak = 0;
+    std::fprintf(stderr, "[hift] appearance verifier %s\n",
+                 d_->extractor ? "attached" : "detached");
+}
 
 bool HiFTTracker::initVTracker(VTrackerParams& params)
 {
@@ -713,9 +823,61 @@ bool HiFTTracker::processFrame(cr::video::Frame& frame)
     {
         if (!d_->haveTemplate)
             return true;
-        const float score = d_->trackStep(frame);
-        d_->params.detectionProbability = score;
-        if (score >= d_->cfg.lossThreshold)
+
+        // Remember last-good box so the verifier can reject a distractor jump.
+        const float pcx = d_->cx, pcy = d_->cy, pbw = d_->bw, pbh = d_->bh;
+
+        float conf = d_->trackStep(frame);
+        bool ok = conf >= d_->cfg.lossThreshold;  // HiFT thinks it's on target
+
+        // ── Appearance verification (DINOv2) ─────────────────────────────
+        // HiFT's cls can't tell the target from a look-alike; the verifier can.
+        if (ok && d_->extractor && !d_->bank.empty())
+        {
+            if (++d_->sinceVerify >= d_->cfg.verifyEvery)
+            {
+                d_->sinceVerify = 0;
+                if (d_->computeEmbedding(frame, d_->cx, d_->cy, d_->bw, d_->bh,
+                                         d_->embBuf))
+                {
+                    const float sim = Impl::cosine(d_->embBuf, d_->bank);
+                    if (sim < d_->cfg.simThreshold)
+                    {
+                        // Distractor: reject the jump, roll back to last-good.
+                        d_->cx = pcx;
+                        d_->cy = pcy;
+                        d_->bw = pbw;
+                        d_->bh = pbh;
+                        d_->velX = d_->velY = 0.0f;
+                        ++d_->vetoStreak;
+                        ok = false;
+                        conf = std::min(conf, d_->cfg.lossThreshold * 0.9f);
+                    }
+                    else
+                    {
+                        d_->vetoStreak = 0;
+                        // EMA-refresh the reference so slow appearance change is
+                        // tracked (only ever on a verified frame).
+                        for (size_t i = 0; i < d_->bank.size(); ++i)
+                            d_->bank[i] =
+                                0.9f * d_->bank[i] + 0.1f * d_->embBuf[i];
+                        Impl::normalize(d_->bank);
+                        // HiFT template refresh — confident AND verified only.
+                        if (d_->cfg.templateRefresh &&
+                            conf >= d_->cfg.refreshMinConf &&
+                            ++d_->sinceRefresh >= d_->cfg.refreshEvery)
+                        {
+                            d_->sinceRefresh = 0;
+                            d_->refreshTemplate(frame);
+                        }
+                    }
+                }
+            }
+        }
+
+        d_->params.detectionProbability = conf;
+
+        if (ok && d_->vetoStreak < d_->cfg.maxVetoStreak)
         {
             d_->mode = MODE_TRACKING;
             d_->lostCounter = 0;
@@ -724,7 +886,6 @@ bool HiFTTracker::processFrame(cr::video::Frame& frame)
         {
             d_->mode = MODE_LOST;
             ++d_->lostCounter;
-            // Inertial coast while lost (lostModeOption 1/2).
             if (d_->params.lostModeOption != 0)
             {
                 d_->cx += d_->velX;
@@ -735,6 +896,7 @@ bool HiFTTracker::processFrame(cr::video::Frame& frame)
                 d_->mode = MODE_FREE;
                 d_->haveTemplate = false;
                 d_->lostCounter = 0;
+                d_->vetoStreak = 0;
             }
         }
     }

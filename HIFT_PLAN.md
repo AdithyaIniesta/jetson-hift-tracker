@@ -78,7 +78,20 @@ high cls score (false confidence), never goes LOST, and the box drifts larger. F
 - **Hard size clamp** — box constrained to [0.4, 2.5]× the captured size, so the regressor
   can't drift it large regardless.
 NOTE: PSR default (psrRef=4.0) may need tuning on-device; the size clamp works regardless.
-Still likely wants a DINOv2 re-detection/identity check for robust re-acquire after loss.
+
+## Hybrid: DINOv2 verifier + template refresh (2026-07-27)
+In-domain (aerial) HiFT is fine, but close-range ground targets → distractor jumps + moderate
+confidence, because HiFT uses a STATIC generic template and has no identity check. CF+DINOv2
+beat it (online-adaptive filter + DINOv2 distractor rejection). Added the hybrid:
+- **DINOv2 verifier** (setFeatureExtractor now real, not a no-op): seed a reference embedding
+  on CAPTURE; every `verifyEvery` frames cosine-compare the current box crop; sim < simThreshold
+  → veto (roll box back to last-good, reject the jump); `maxVetoStreak` vetoes → LOST.
+  Re-acquisition after LOST must pass the verifier. EMA-refresh the reference on verified frames.
+- **HiFT template refresh** — re-run setTemplate on the current box every `refreshEvery` frames,
+  ONLY when HiFT-confident AND verifier-confirmed (can't adapt onto a distractor).
+- Env tunables: TRACKER_HIFT_SIM (veto threshold), plus LOSS/PSR/WINDOW from before.
+REQUIRES models/dinov2_small.onnx present (re-export: tools/export_dinov2.py) and run with
+TRACKER_VERIFIER=dino. Without the model the verifier silently no-ops (bank stays empty).
 
 ## Build & run (Jetson)
 1. Export ONNX (once):  python3 tools/export_hift.py --snapshot models/first.pth --config hift/experiments/config.yaml

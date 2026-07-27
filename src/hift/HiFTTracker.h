@@ -35,6 +35,18 @@ struct HiFTTrackerConfig
     // position (damps flip-flop between competing peaks). Tunable via
     // TRACKER_HIFT_WINDOW.
     float windowInf = 0.42f;
+
+    // ── DINOv2 appearance verifier (hybrid) ──────────────────────────────
+    // HiFT localizes; the verifier guards identity — rejects distractor jumps
+    // and gates re-acquisition. Active only when a FeatureExtractor is set.
+    float simThreshold = 0.45f;  // cosine sim below this = appearance mismatch
+    int   verifyEvery  = 3;      // verify every N tracking frames
+    int   maxVetoStreak = 3;     // consecutive vetoes -> LOST
+    // HiFT template refresh, gated on a HiFT-confident AND verifier-confirmed
+    // frame (so it can never adapt onto a distractor).
+    bool  templateRefresh = true;
+    int   refreshEvery    = 45;  // frames between refreshes
+    float refreshMinConf  = 0.5f;
 };
 
 class HiFTTracker : public cr::vtracker::VTracker
@@ -64,10 +76,11 @@ public:
 
     // ── CvTracker API-compat shims (so HiFTTracker is a drop-in for the
     //    pipeline's concrete-type call sites) ─────────────────────────────
-    // HiFT self-verifies via its cls score, so there is no appearance
-    // extractor — this is a no-op accepted for source compatibility.
+    // Attach the DINOv2 appearance verifier. When set, HiFTTracker seeds a
+    // reference embedding on CAPTURE and vetoes distractor jumps (see .cpp).
+    // Pass nullptr to disable. Clears the reference bank.
     void setFeatureExtractor(
-        std::shared_ptr<cr::vtracker::FeatureExtractor> /*extractor*/) {}
+        std::shared_ptr<cr::vtracker::FeatureExtractor> extractor);
     // Handoff bank transfer maps to the HiFT template crop.
     bool exportTemplateBank(std::vector<unsigned char>& out) const
     {
