@@ -55,6 +55,18 @@ Box post-processing (getcentercuda) ported to C++.
       HiFT template, epipolar no-op), src/CMakeLists ENABLE_HIFT (TRT/CUDA + defines),
       build.sh option [6]. NEXT: build on Jetson (option 6) + iterate compile errors + GUI test.
 
+## Single-camera stability fixes (2026-07-27)
+Audit vs hift_tracker.py: decode/penalty/window/argmax/crop-centering all faithful;
+cls1 correctly softmaxed from raw logits (track() returns raw grader output, no double
+softmax). Fixed three robustness issues in the mode-machine glue:
+- **lr clamped to [0,1]** — cls2 is an unbounded BCE logit, so raw penalty*score*LR could
+  exceed 1 and make the box-size update extrapolate (blow-up/jitter).
+- **Confidence = bounded fg probability** — LOST detection now uses the softmax foreground
+  prob (0..1), not the logit-inflated fused score, so lossThreshold is meaningful.
+- **Bilinear crop** — matches cv2.resize the ONNX was traced with (nearest added jitter).
+- `TRACKER_HIFT_LOSS` env tunes the threshold without a rebuild.
+Root-cause test still pending on Jetson: `TRACKER_HIFT_DUMP=1` to verify the YUV→BGR crop.
+
 ## Build & run (Jetson)
 1. Export ONNX (once):  python3 tools/export_hift.py --snapshot models/first.pth --config hift/experiments/config.yaml
 2. Build:  ./build.sh  → choose [6] hift   (first run builds TRT engines from ONNX; minutes)

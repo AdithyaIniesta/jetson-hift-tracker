@@ -242,26 +242,43 @@ struct HiFTTracker::Impl
         float* G = out.data() + plane;
         float* R = out.data() + 2 * plane;
         const float sc = (float)originalSz / (float)modelSz;
+        // BGR of one integer source pixel (channel average if out of bounds).
+        auto bgrAt = [&](int x, int y, float& b, float& g, float& r) {
+            if (x < 0 || y < 0 || x >= frame.width || y >= frame.height)
+            {
+                b = channelB;
+                g = channelG;
+                r = channelR;
+                return;
+            }
+            float Y, U, V;
+            pixelYuv(frame, x, y, Y, U, V);
+            yuvToBgr(Y, U, V, b, g, r);
+        };
         for (int oy = 0; oy < modelSz; ++oy)
         {
-            const int sy = (int)std::lround(ymin + (oy + 0.5f) * sc - 0.5f);
+            const float fy = ymin + (oy + 0.5f) * sc - 0.5f;
+            const int y0 = (int)std::floor(fy);
+            const float ay = fy - y0;
             for (int ox = 0; ox < modelSz; ++ox)
             {
-                const int sx = (int)std::lround(xmin + (ox + 0.5f) * sc - 0.5f);
+                const float fx = xmin + (ox + 0.5f) * sc - 0.5f;
+                const int x0 = (int)std::floor(fx);
+                const float ax = fx - x0;
+                // Bilinear blend of the 4 neighbours (matches cv2.resize, the
+                // interpolation the ONNX was traced against; nearest-neighbour
+                // adds sub-pixel jitter frame-to-frame).
+                float b00, g00, r00, b10, g10, r10, b01, g01, r01, b11, g11, r11;
+                bgrAt(x0, y0, b00, g00, r00);
+                bgrAt(x0 + 1, y0, b10, g10, r10);
+                bgrAt(x0, y0 + 1, b01, g01, r01);
+                bgrAt(x0 + 1, y0 + 1, b11, g11, r11);
+                const float w00 = (1 - ax) * (1 - ay), w10 = ax * (1 - ay);
+                const float w01 = (1 - ax) * ay, w11 = ax * ay;
                 const int j = oy * modelSz + ox;
-                if (sx < 0 || sy < 0 || sx >= frame.width || sy >= frame.height)
-                {
-                    B[j] = channelB;
-                    G[j] = channelG;
-                    R[j] = channelR;
-                    continue;
-                }
-                float Y, U, V, b, g, r;
-                pixelYuv(frame, sx, sy, Y, U, V);
-                yuvToBgr(Y, U, V, b, g, r);
-                B[j] = b;
-                G[j] = g;
-                R[j] = r;
+                B[j] = w00 * b00 + w10 * b10 + w01 * b01 + w11 * b11;
+                G[j] = w00 * g00 + w10 * g10 + w01 * g01 + w11 * g11;
+                R[j] = w00 * r00 + w10 * r10 + w01 * r01 + w11 * r11;
             }
         }
     }
@@ -363,7 +380,7 @@ struct HiFTTracker::Impl
 
         float bestP = -1e30f;
         int best = 0;
-        float bestScore = 0.0f, bestPenalty = 0.0f;
+        float bestScore = 0.0f, bestPenalty = 0.0f, bestFg = 0.0f;
         float bbx = 0, bby = 0, bbw = 0, bbh = 0;
 
         const float refW = bw * scaleZ;
@@ -392,8 +409,9 @@ struct HiFTTracker::Impl
             const float a1 = cls1[1 * P + j];
             const float m = std::max(a0, a1);
             const float e0 = std::exp(a0 - m), e1 = std::exp(a1 - m);
-            const float score1 = (e1 / (e0 + e1)) * HIFT_W2;
-            const float score2 = cls2[j] * HIFT_W3;
+            const float fg = e1 / (e0 + e1);              // bounded 0..1
+            const float score1 = fg * HIFT_W2;
+            const float score2 = cls2[j] * HIFT_W3;       // cls2 is a raw logit
             const float score = (score1 + score2) * 0.5f;
 
             const float sc = change(szf(w, h) / (refSz + 1e-9f));
@@ -409,6 +427,7 @@ struct HiFTTracker::Impl
                 bestP = pscore;
                 best = j;
                 bestScore = score;
+                bestFg = fg;
                 bestPenalty = penalty;
                 bbx = bx;
                 bby = by;
@@ -425,7 +444,11 @@ struct HiFTTracker::Impl
         const float ow = bbw * invSz;
         const float oh = bbh * invSz;
 
-        const float lr = bestPenalty * bestScore * HIFT_LR;
+        // Learning rate must stay a fraction: cls2 is an unbounded logit, so the
+        // raw penalty*score*LR can exceed 1 and make the size update extrapolate
+        // (box blow-up / jitter). Clamp to [0,1].
+        const float lr =
+            std::min(1.0f, std::max(0.0f, bestPenalty * bestScore * HIFT_LR));
         const float newCx = ox + cx;
         const float newCy = oy + cy;
         float newW = bw * (1.0f - lr) + ow * lr;
@@ -443,14 +466,25 @@ struct HiFTTracker::Impl
         cy = ncy;
         bw = newW;
         bh = newH;
-        return bestScore;
+        // Return the BOUNDED foreground probability as the confidence, so the
+        // FREE/TRACKING/LOST machine's lossThreshold is meaningful (the fused
+        // `score` includes the unbounded cls2 logit and is not a 0..1 signal).
+        return bestFg;
     }
 };
 
 HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
 {
     d_->cfg = cfg;
-    d_->engineReady = d_->engine.initialise(cfg.trt);
+    // Loss threshold is compared against the foreground probability (0..1) and
+    // can be tuned on the Jetson without a rebuild: TRACKER_HIFT_LOSS=0.15
+    if (const char* e = std::getenv("TRACKER_HIFT_LOSS"))
+    {
+        const float v = (float)atof(e);
+        if (v > 0.0f && v < 1.0f)
+            d_->cfg.lossThreshold = v;
+    }
+    d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
         std::fprintf(stderr, "[hift] engine init FAILED — tracker inert\n");
 }
