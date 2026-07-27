@@ -436,8 +436,8 @@ struct HiFTTracker::Impl
                 change(refRatio / ((w / (h + 1e-5f)) + 1e-9f));
             const float penalty = std::exp(-(rc * sc - 1.0f) * HIFT_PENALTY_K);
             float pscore = penalty * score;
-            pscore = pscore * (1.0f - HIFT_WINDOW_INF) +
-                     window[j] * HIFT_WINDOW_INF;
+            pscore = pscore * (1.0f - cfg.windowInf) +
+                     window[j] * cfg.windowInf;
 
             if (pscore > bestP)
             {
@@ -533,6 +533,13 @@ HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
         if (v > 0.5f && v < 50.0f)
             d_->cfg.psrRef = v;
     }
+    // TRACKER_HIFT_WINDOW: stronger center bias (0..0.95) to damp peak flip-flop.
+    if (const char* e = std::getenv("TRACKER_HIFT_WINDOW"))
+    {
+        const float v = (float)atof(e);
+        if (v >= 0.0f && v < 0.95f)
+            d_->cfg.windowInf = v;
+    }
     d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
         std::fprintf(stderr, "[hift] engine init FAILED — tracker inert\n");
@@ -598,6 +605,17 @@ float HiFTTracker::getParam(VTrackerParam id)
         return (float)d_->params.lostModeOption;
     case VTrackerParam::MAX_FRAMES_IN_LOST_MODE:
         return (float)d_->params.maxFramesInLostMode;
+#ifdef TRACKER_V2
+    // The pipeline's external EKF (tracker.cpp) reads these to smooth the
+    // tracker's per-frame position. HiFT's raw argmax jitters frame-to-frame,
+    // so we DO want that smoothing — return valid noise params (base defaults),
+    // not the -1 fallthrough that fed the EKF negative variances and made the
+    // "smoothed" output wobble.
+    case VTrackerParam::ENABLE_EKF: return 1.0f;
+    case VTrackerParam::EKF_SIGMA_A: return 1.5f;
+    case VTrackerParam::EKF_SIGMA_ALPHA: return 0.15f;
+    case VTrackerParam::EKF_R_BASE: return 4.0f;
+#endif
     default: return -1.0f;
     }
 }

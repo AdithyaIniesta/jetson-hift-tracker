@@ -31,6 +31,10 @@ struct HiFTTrackerConfig
     // PSR (peak sharpness) at which confidence saturates. Higher = stricter loss
     // detection. Tunable at runtime via TRACKER_HIFT_PSR.
     float psrRef = 4.0f;
+    // Cosine-window influence: higher biases the peak pick toward the last
+    // position (damps flip-flop between competing peaks). Tunable via
+    // TRACKER_HIFT_WINDOW.
+    float windowInf = 0.42f;
 };
 
 class HiFTTracker : public cr::vtracker::VTracker
