@@ -28,8 +28,9 @@ constexpr int MODE_STATIC = 4;
 
 // Box size may not stray beyond this band around the captured size (stops the
 // HiFT regressor drifting the box larger when it locks onto clutter).
-constexpr float SIZE_MIN = 0.4f;
-constexpr float SIZE_MAX = 2.5f;
+// NB: not SIZE_MIN/SIZE_MAX — SIZE_MAX is a <stdint.h> macro.
+constexpr float BOX_SIZE_MIN = 0.4f;
+constexpr float BOX_SIZE_MAX = 2.5f;
 
 // atanh with the HiFT clamp (dcon in hift_tracker.py), then loc decode scale.
 inline float dcon(float x)
@@ -495,8 +496,8 @@ struct HiFTTracker::Impl
 
         // Hard size clamp relative to the captured size — HiFT's regressor drifts
         // the box larger over time; never let it stray far from what was captured.
-        newW = std::max(SIZE_MIN * bw0, std::min(newW, SIZE_MAX * bw0));
-        newH = std::max(SIZE_MIN * bh0, std::min(newH, SIZE_MAX * bh0));
+        newW = std::max(BOX_SIZE_MIN * bw0, std::min(newW, BOX_SIZE_MAX * bw0));
+        newH = std::max(BOX_SIZE_MIN * bh0, std::min(newH, BOX_SIZE_MAX * bh0));
         // Frame clip.
         const float ncx = std::max(0.0f, std::min(newCx, (float)frame.width));
         const float ncy = std::max(0.0f, std::min(newCy, (float)frame.height));
