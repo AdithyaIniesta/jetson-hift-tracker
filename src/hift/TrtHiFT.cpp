@@ -5,6 +5,7 @@
 #ifdef CVTRACKER_WITH_TENSORRT
 
 #include <NvInfer.h>
+#include <NvInferPlugin.h>
 #include <NvOnnxParser.h>
 #include <cuda_runtime_api.h>
 
@@ -202,6 +203,14 @@ bool TrtHiFT::ready() const { return d_->ok; }
 
 bool TrtHiFT::initialise(const TrtHiFTConfig& cfg)
 {
+    // Register TensorRT's built-in plugins ONCE. The HiFT transformer track
+    // engine uses a plugin op; without the plugin creators in the registry the
+    // cached .engine fails to deserialize (IPluginCreator not found), so every
+    // run would rebuild from ONNX. This makes the engine cache actually reload.
+    static const bool pluginsReady =
+        initLibNvInferPlugins(&trtLogger(), "");
+    (void)pluginsReady;
+
     d_->runtime.reset(nvinfer1::createInferRuntime(trtLogger()));
     if (!d_->runtime)
         return false;

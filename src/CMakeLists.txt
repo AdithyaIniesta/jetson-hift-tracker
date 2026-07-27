@@ -119,17 +119,21 @@ if(ENABLE_HIFT)
     find_path(HIFT_CUDA_INCLUDE cuda_runtime_api.h HINTS /usr/local/cuda/include)
     find_library(HIFT_NVINFER_LIB nvinfer
         HINTS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu)
+    find_library(HIFT_NVINFER_PLUGIN_LIB nvinfer_plugin
+        HINTS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu)
     find_library(HIFT_NVONNXPARSER_LIB nvonnxparser
         HINTS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu)
     find_library(HIFT_CUDART_LIB cudart HINTS /usr/local/cuda/lib64)
     if(NOT HIFT_TRT_INCLUDE OR NOT HIFT_CUDA_INCLUDE OR NOT HIFT_NVINFER_LIB
-       OR NOT HIFT_NVONNXPARSER_LIB OR NOT HIFT_CUDART_LIB)
+       OR NOT HIFT_NVINFER_PLUGIN_LIB OR NOT HIFT_NVONNXPARSER_LIB
+       OR NOT HIFT_CUDART_LIB)
         message(FATAL_ERROR "HiFT build needs TensorRT + CUDA (JetPack) — not found")
     endif()
     target_include_directories(${EXE_NAME} PRIVATE
         ${HIFT_TRT_INCLUDE} ${HIFT_CUDA_INCLUDE})
     target_link_libraries(${EXE_NAME} PRIVATE
-        ${HIFT_NVINFER_LIB} ${HIFT_NVONNXPARSER_LIB} ${HIFT_CUDART_LIB})
+        ${HIFT_NVINFER_LIB} ${HIFT_NVINFER_PLUGIN_LIB}
+        ${HIFT_NVONNXPARSER_LIB} ${HIFT_CUDART_LIB})
 endif()
 
 find_package(OpenMP)
