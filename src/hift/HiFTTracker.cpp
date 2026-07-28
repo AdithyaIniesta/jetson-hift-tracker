@@ -215,7 +215,8 @@ struct HiFTTracker::Impl
     // ── DINOv2 verifier state ────────────────────────────────────────────
     std::shared_ptr<cr::vtracker::FeatureExtractor> extractor;
     std::vector<float> bank;      // reference embedding (unit norm)
-    std::vector<float> grayBuf;   // reusable gray verifier crop
+    std::vector<float> grayBuf;   // reusable gray verifier crop (fallback)
+    std::vector<float> colorBuf;  // reusable RGB verifier crop (CHW, 0..255)
     std::vector<float> embBuf;    // reusable embedding
     int vetoStreak{0};
     int sinceVerify{0};
@@ -356,13 +357,51 @@ struct HiFTTracker::Impl
         }
     }
 
+    // RGB (colour) crop of the box region → CHW, 0..255, for the ImageNet/
+    // DINOv2 extractor. Colour is a strong target discriminator; grayscale
+    // throws it away.
+    void buildColorCrop(const cr::video::Frame& frame, float pcx, float pcy,
+                        float boxW, float boxH, int outSz, std::vector<float>& out)
+    {
+        out.resize((size_t)outSz * outSz * 3);
+        const int plane = outSz * outSz;
+        float* R = out.data();
+        float* G = out.data() + plane;
+        float* B = out.data() + 2 * plane;
+        const float x0 = pcx - boxW * 0.5f;
+        const float y0 = pcy - boxH * 0.5f;
+        const float scx = boxW / (float)outSz;
+        const float scy = boxH / (float)outSz;
+        for (int oy = 0; oy < outSz; ++oy)
+        {
+            int sy = (int)std::lround(y0 + (oy + 0.5f) * scy);
+            sy = std::max(0, std::min(sy, frame.height - 1));
+            for (int ox = 0; ox < outSz; ++ox)
+            {
+                int sx = (int)std::lround(x0 + (ox + 0.5f) * scx);
+                sx = std::max(0, std::min(sx, frame.width - 1));
+                float Y, U, V, b, g, r;
+                pixelYuv(frame, sx, sy, Y, U, V);
+                yuvToBgr(Y, U, V, b, g, r);
+                const int j = oy * outSz + ox;
+                R[j] = r;
+                G[j] = g;
+                B[j] = b;
+            }
+        }
+    }
+
     bool computeEmbedding(const cr::video::Frame& frame, float pcx, float pcy,
                           float boxW, float boxH, std::vector<float>& emb)
     {
         if (!extractor)
             return false;
-        buildGrayCrop(frame, pcx, pcy, boxW, boxH, extractor->inputSize(),
-                      grayBuf);
+        const int S = extractor->inputSize();
+        // Prefer the colour path; fall back to grayscale if unsupported.
+        buildColorCrop(frame, pcx, pcy, boxW, boxH, S, colorBuf);
+        if (extractor->extractColor(colorBuf.data(), emb))
+            return true;
+        buildGrayCrop(frame, pcx, pcy, boxW, boxH, S, grayBuf);
         return extractor->extract(grayBuf.data(), emb);
     }
 

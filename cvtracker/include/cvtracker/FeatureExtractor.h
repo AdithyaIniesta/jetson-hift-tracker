@@ -35,6 +35,17 @@ public:
     /// as it is consistent between calls. Return false on failure (the
     /// verifier then skips this frame - tracking is unaffected).
     virtual bool extract(const float* patch, std::vector<float>& embedding) = 0;
+
+    /// Optional COLOUR path: patch is inputSize()*inputSize()*3 floats in CHW
+    /// order, RGB, pixel range [0..255]. Preserves colour (a strong target
+    /// discriminator) instead of the grayscale replication extract() uses —
+    /// important for ImageNet/DINOv2 backbones trained on colour. Returns false
+    /// if the extractor has no colour path, so callers fall back to extract().
+    virtual bool extractColor(const float* /*patchRGB_CHW*/,
+                              std::vector<float>& /*embedding*/)
+    {
+        return false;
+    }
 };
 
 /// Dependency-free fallback extractor: the embedding is simply the

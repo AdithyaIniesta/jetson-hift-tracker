@@ -117,7 +117,35 @@ public:
             for (int i = 0; i < n; ++i)
                 dst[i] = (patch[i] * (1.0f / 255.0f) - mean) * inv;
         }
+        return runInference(embedding);
+    }
 
+    /// Colour path: patchRGB is C x S x S (CHW, RGB, 0..255). Applies the
+    /// per-channel ImageNet mean/std to the real colour planes (no grayscale
+    /// replication). Only meaningful for 3-channel models.
+    bool extractColor(const float* patchRGB,
+                      std::vector<float>& embedding) override
+    {
+        if (m_cfg.channels != 3)
+            return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const int n = m_cfg.inputSize * m_cfg.inputSize;
+        for (int c = 0; c < 3; ++c)
+        {
+            const float mean = m_cfg.mean[c];
+            const float inv = 1.0f / m_cfg.std[c];
+            const float* src = patchRGB + (size_t)c * n;
+            float* dst = m_hostIn.data() + (size_t)c * n;
+            for (int i = 0; i < n; ++i)
+                dst[i] = (src[i] * (1.0f / 255.0f) - mean) * inv;
+        }
+        return runInference(embedding);
+    }
+
+private:
+    /// Run the engine on the already-filled m_hostIn and fill `embedding`.
+    bool runInference(std::vector<float>& embedding)
+    {
         if (cudaMemcpyAsync(m_dIn, m_hostIn.data(),
                             m_inCount * sizeof(float),
                             cudaMemcpyHostToDevice, m_stream) != cudaSuccess)
@@ -146,6 +174,8 @@ public:
         embedding.assign(m_hostOut.begin(), m_hostOut.end());
         return true;
     }
+
+public:
 
 private:
     bool buildOrLoadEngine()
