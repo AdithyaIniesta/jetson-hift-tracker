@@ -93,6 +93,15 @@ beat it (online-adaptive filter + DINOv2 distractor rejection). Added the hybrid
 REQUIRES models/dinov2_small.onnx present (re-export: tools/export_dinov2.py) and run with
 TRACKER_VERIFIER=dino. Without the model the verifier silently no-ops (bank stays empty).
 
+## Active re-detection scan (2026-07-28) — the "search, not just veto" piece
+The veto only checks the box HiFT already picked; it never searches. So after a full
+occlusion HiFT (search window on last position) couldn't re-find the target. Added an active
+LOST-mode scan: probe a coarse 4x4 grid of frame centers (probesPerFrame per LOST frame,
+swept across frames), run HiFT at each probe, confirm with DINOv2 (cosine >= reacquireThreshold,
+stricter than the veto). On a confirmed match → re-seed the HiFT template there and resume
+TRACKING. Stay in LOST (scanning) up to redetectMaxFrames when the verifier is on. Env:
+TRACKER_HIFT_REACQ. Cost while LOST: ~3 HiFT calls + 2 DINOv2 extracts/frame (fine).
+
 ## Build & run (Jetson)
 1. Export ONNX (once):  python3 tools/export_hift.py --snapshot models/first.pth --config hift/experiments/config.yaml
 2. Build:  ./build.sh  → choose [6] hift   (first run builds TRT engines from ONNX; minutes)

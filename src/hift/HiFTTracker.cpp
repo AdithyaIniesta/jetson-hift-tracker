@@ -220,6 +220,10 @@ struct HiFTTracker::Impl
     int vetoStreak{0};
     int sinceVerify{0};
     int sinceRefresh{0};
+    // Re-detection probe grid (frame-space centers, swept across LOST frames).
+    std::vector<std::pair<float, float>> probeCenters;
+    int probeIndex{0};
+    int probeGridW{0}, probeGridH{0};
 
     Impl()
     {
@@ -395,6 +399,63 @@ struct HiFTTracker::Impl
         buildCrop(frame, cx, cy, (int)sz, HIFT_EXEMPLAR, zBuf);
         if (engine.setTemplate(zBuf.data()))
             templateCrop = zBuf;
+    }
+
+    // Coarse grid of probe centers covering the frame (built once per size).
+    void buildProbeGrid(int w, int h)
+    {
+        if (probeGridW == w && probeGridH == h && !probeCenters.empty())
+            return;
+        probeGridW = w;
+        probeGridH = h;
+        probeCenters.clear();
+        const float f[4] = {0.2f, 0.4f, 0.6f, 0.8f};
+        for (float ry : f)
+            for (float rx : f)
+                probeCenters.emplace_back(rx * w, ry * h);
+    }
+
+    // Active re-detection: probe a few grid centers this frame, run HiFT at each
+    // and confirm with DINOv2. Returns true (and re-acquires) on a confirmed
+    // match. Leaves the box at last-good on failure.
+    bool tryRedetect(const cr::video::Frame& frame)
+    {
+        if (!extractor || bank.empty())
+            return false;
+        buildProbeGrid(frame.width, frame.height);
+        if (probeCenters.empty())
+            return false;
+        const float lcx = cx, lcy = cy, lbw = bw, lbh = bh;
+        for (int k = 0; k < cfg.probesPerFrame; ++k)
+        {
+            const auto& pc = probeCenters[probeIndex % probeCenters.size()];
+            ++probeIndex;
+            cx = pc.first;
+            cy = pc.second;
+            bw = lbw;
+            bh = lbh;
+            const float conf = trackStep(frame);  // HiFT localizes near probe
+            if (conf >= cfg.lossThreshold &&
+                computeEmbedding(frame, cx, cy, bw, bh, embBuf))
+            {
+                const float sim = cosine(embBuf, bank);
+                if (sim >= cfg.reacquireThreshold)
+                {
+                    refreshTemplate(frame);  // re-seed HiFT at the found target
+                    vetoStreak = 0;
+                    lostCounter = 0;
+                    sinceVerify = 0;
+                    sinceRefresh = 0;
+                    return true;
+                }
+            }
+            cx = lcx;  // reject this probe, restore last-good
+            cy = lcy;
+            bw = lbw;
+            bh = lbh;
+            velX = velY = 0.0f;
+        }
+        return false;
     }
 
     void doCapture(const cr::video::Frame& frame)
@@ -638,6 +699,13 @@ HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
         const float v = (float)atof(e);
         if (v > 0.0f && v < 1.0f)
             d_->cfg.simThreshold = v;
+    }
+    // TRACKER_HIFT_REACQ: re-detection acceptance threshold (stricter than SIM).
+    if (const char* e = std::getenv("TRACKER_HIFT_REACQ"))
+    {
+        const float v = (float)atof(e);
+        if (v > 0.0f && v < 1.0f)
+            d_->cfg.reacquireThreshold = v;
     }
     d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
@@ -886,17 +954,37 @@ bool HiFTTracker::processFrame(cr::video::Frame& frame)
         {
             d_->mode = MODE_LOST;
             ++d_->lostCounter;
-            if (d_->params.lostModeOption != 0)
+
+            // Active re-detection: scan the frame with HiFT+DINOv2 to re-find the
+            // target (occlusion / re-entry), not just re-search the last spot.
+            const bool verifierOn = d_->extractor && !d_->bank.empty();
+            bool reacquired = false;
+            if (d_->cfg.redetect && verifierOn)
+                reacquired = d_->tryRedetect(frame);
+
+            if (reacquired)
             {
-                d_->cx += d_->velX;
-                d_->cy += d_->velY;
+                d_->mode = MODE_TRACKING;
+                d_->params.detectionProbability = d_->cfg.reacquireThreshold;
             }
-            if (d_->lostCounter > d_->params.maxFramesInLostMode)
+            else
             {
-                d_->mode = MODE_FREE;
-                d_->haveTemplate = false;
-                d_->lostCounter = 0;
-                d_->vetoStreak = 0;
+                if (d_->params.lostModeOption != 0)
+                {
+                    d_->cx += d_->velX;
+                    d_->cy += d_->velY;
+                }
+                // Keep scanning longer when we CAN re-detect; otherwise fall
+                // back to the user's LOST budget.
+                const int budget = verifierOn ? d_->cfg.redetectMaxFrames
+                                              : d_->params.maxFramesInLostMode;
+                if (d_->lostCounter > budget)
+                {
+                    d_->mode = MODE_FREE;
+                    d_->haveTemplate = false;
+                    d_->lostCounter = 0;
+                    d_->vetoStreak = 0;
+                }
             }
         }
     }

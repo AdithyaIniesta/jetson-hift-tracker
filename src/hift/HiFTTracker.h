@@ -47,6 +47,15 @@ struct HiFTTrackerConfig
     bool  templateRefresh = true;
     int   refreshEvery    = 45;  // frames between refreshes
     float refreshMinConf  = 0.5f;
+
+    // ── Active re-detection scan (LOST mode) ─────────────────────────────
+    // When LOST, probe candidate locations across the frame: run HiFT there and
+    // confirm with DINOv2. This is what re-finds the target after occlusion —
+    // the verifier searches, not just vetoes. Needs an attached extractor.
+    bool  redetect = true;
+    int   probesPerFrame = 2;         // HiFT+DINOv2 probes per LOST frame
+    float reacquireThreshold = 0.55f; // stricter than veto to avoid false locks
+    int   redetectMaxFrames = 300;    // stay in LOST (scanning) this long
 };
 
 class HiFTTracker : public cr::vtracker::VTracker
