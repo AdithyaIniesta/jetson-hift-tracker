@@ -39,7 +39,10 @@ struct HiFTTrackerConfig
     // ── DINOv2 appearance verifier (hybrid) ──────────────────────────────
     // HiFT localizes; the verifier guards identity — rejects distractor jumps
     // and gates re-acquisition. Active only when a FeatureExtractor is set.
-    float simThreshold = 0.45f;  // cosine sim below this = appearance mismatch
+    // Calibrated on-device (grayscale DINOv2): true target ~0.90-0.99, so the
+    // old 0.45 never fired. 0.75 rejects distractors; true-target dips below it
+    // are rare and only cost a harmless 1-frame rollback.
+    float simThreshold = 0.75f;  // cosine sim below this = appearance mismatch
     int   verifyEvery  = 3;      // verify every N tracking frames
     int   maxVetoStreak = 3;     // consecutive vetoes -> LOST
     // HiFT template refresh, gated on a HiFT-confident AND verifier-confirmed
@@ -54,7 +57,7 @@ struct HiFTTrackerConfig
     // the verifier searches, not just vetoes. Needs an attached extractor.
     bool  redetect = true;
     int   probesPerFrame = 2;         // HiFT+DINOv2 probes per LOST frame
-    float reacquireThreshold = 0.55f; // stricter than veto to avoid false locks
+    float reacquireThreshold = 0.88f; // strong match to re-lock (true target ~0.9+)
     int   redetectMaxFrames = 300;    // stay in LOST (scanning) this long
 };
 
