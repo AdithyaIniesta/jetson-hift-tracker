@@ -220,6 +220,7 @@ struct HiFTTracker::Impl
     int vetoStreak{0};
     int sinceVerify{0};
     int sinceRefresh{0};
+    bool debug{false};  // TRACKER_HIFT_DEBUG: log verifier similarities
     // Re-detection probe grid (frame-space centers, swept across LOST frames).
     std::vector<std::pair<float, float>> probeCenters;
     int probeIndex{0};
@@ -439,6 +440,11 @@ struct HiFTTracker::Impl
                 computeEmbedding(frame, cx, cy, bw, bh, embBuf))
             {
                 const float sim = cosine(embBuf, bank);
+                if (debug)
+                    std::fprintf(stderr,
+                                 "[hift] redetect probe(%.0f,%.0f) conf=%.3f "
+                                 "sim=%.3f (reacq>=%.2f)\n",
+                                 cx, cy, conf, sim, cfg.reacquireThreshold);
                 if (sim >= cfg.reacquireThreshold)
                 {
                     refreshTemplate(frame);  // re-seed HiFT at the found target
@@ -707,6 +713,7 @@ HiFTTracker::HiFTTracker(const HiFTTrackerConfig& cfg) : d_(new Impl)
         if (v > 0.0f && v < 1.0f)
             d_->cfg.reacquireThreshold = v;
     }
+    d_->debug = std::getenv("TRACKER_HIFT_DEBUG") != nullptr;
     d_->engineReady = d_->engine.initialise(d_->cfg.trt);
     if (!d_->engineReady)
         std::fprintf(stderr, "[hift] engine init FAILED — tracker inert\n");
@@ -909,6 +916,11 @@ bool HiFTTracker::processFrame(cr::video::Frame& frame)
                                          d_->embBuf))
                 {
                     const float sim = Impl::cosine(d_->embBuf, d_->bank);
+                    if (d_->debug)
+                        std::fprintf(stderr,
+                                     "[hift] verify sim=%.3f conf=%.3f "
+                                     "(veto<%.2f)\n",
+                                     sim, conf, d_->cfg.simThreshold);
                     if (sim < d_->cfg.simThreshold)
                     {
                         // Distractor: reject the jump, roll back to last-good.
